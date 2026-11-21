@@ -954,6 +954,51 @@ becomes
 
         SELECT ... FROM ... FINAL GROUP BY ...
 
+PREWHERE
+++++++++
+
+A ``PREWHERE`` clause can be added explicitly. It is rendered after
+``FINAL`` and before ``WHERE``:
+
+    .. code-block:: python
+
+        select([table.c.x]).prewhere(table.c.x == 1).final()
+
+becomes
+
+    .. code-block:: sql
+
+        SELECT ... FROM ... FINAL PREWHERE x = 1
+
+For ``MergeTree``-family tables the ``prewhere_rewrite()`` method can add
+it automatically: simple top-level ``WHERE`` conditions that compare real
+sorting key (``ORDER BY``) columns to bound values are moved to
+``PREWHERE`` so ClickHouse reads less of the wide columns.  ``OR`` groups
+that only contain such conditions are moved as a whole, while conditions
+on mutable columns (and ``OR`` groups mixing them in) always stay in
+``WHERE`` -- this keeps ``FINAL`` queries on ``ReplacingMergeTree``
+correct, since filtering on a mutable column before the merge would
+resurrect replaced row versions.  A column that is merely referenced by a
+sorting key expression (e.g. ``ORDER BY toDate(ts)``) is not treated as a
+sorting key column.  Queries with joins or unclear sources are returned
+unchanged.
+
+    .. code-block:: python
+
+        select([table]).where(
+            and_(table.c.day == today, table.c.state == 'open')
+        ).final().prewhere_rewrite()
+
+becomes
+
+    .. code-block:: sql
+
+        SELECT ... FROM ... FINAL PREWHERE day = %(day_1)s WHERE state = %(state_1)s
+
+The original select object and its bound parameters are left untouched;
+the rewritten statement has its own compilation cache key, so default and
+rewritten queries never share cached SQL.
+
 Miscellaneous
 -------------
 

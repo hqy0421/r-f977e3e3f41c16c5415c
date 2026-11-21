@@ -304,6 +304,15 @@ class ClickHouseSQLCompiler(compiler.SQLCompiler):
         if final_clause is not None:
             text += self.final_clause()
 
+        prewhere_criteria = getattr(select, '_prewhere_criteria', None)
+
+        if prewhere_criteria:
+            t = self._generate_delimited_and_list(
+                prewhere_criteria, from_linter=from_linter, **kwargs
+            )
+            if t:
+                text += " \nPREWHERE " + t
+
         if select._where_criteria:
             t = self._generate_delimited_and_list(
                 select._where_criteria, from_linter=from_linter, **kwargs

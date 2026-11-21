@@ -1,6 +1,11 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+- ``PREWHERE`` clause support: ``Select.prewhere()``/``Query.prewhere()`` and an opt-in ``Select.prewhere_rewrite()`` that moves simple top-level ``WHERE`` conditions on real sorting key (``ORDER BY``) columns of a single ``MergeTree``-family table into ``PREWHERE``. ``OR`` groups containing only such conditions are moved as a whole; conditions on mutable columns stay in ``WHERE`` so ``FINAL`` queries on ``ReplacingMergeTree`` never resurrect replaced row versions. Queries with joins or unclear sources are left unchanged.
+
+### Fixed
+- ClickHouse-specific ``SELECT`` state (``FINAL``, ``SAMPLE``, ``LIMIT BY``, ``ARRAY JOIN``, ``WITH CUBE/ROLLUP/TOTALS``, ``PREWHERE``) now takes part in the SQL compilation cache key, so the compiled cache can no longer serve SQL of a default query for a modified one (e.g. ``FINAL``) or vice versa.
 
 ## [0.3.2] - 2024-06-12
 ### Added

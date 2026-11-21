@@ -1,7 +1,9 @@
 from functools import partial
 
 from sqlalchemy import exc
+from sqlalchemy.sql import coercions, roles
 from sqlalchemy.sql.base import _generative
+from sqlalchemy.sql.selectable import Select as StandardSelect
 from sqlalchemy.orm.query import Query as BaseQuery
 
 from ..ext.clauses import (
@@ -10,6 +12,7 @@ from ..ext.clauses import (
     LimitByClause,
     sample_clause,
 )
+from ..sql.selectable import Select as ClickHouseSelect
 
 
 def _compile_state_factory(orig_compile_state_factory, query, statement,
@@ -23,6 +26,7 @@ def _compile_state_factory(orig_compile_state_factory, query, statement,
     new_stmt._sample_clause = sample_clause(query._sample)
     new_stmt._limit_by_clause = query._limit_by
     new_stmt._array_join = query._array_join
+    new_stmt._prewhere_criteria = query._prewhere_criteria
     return rv
 
 
@@ -34,9 +38,25 @@ class Query(BaseQuery):
     _sample = None
     _limit_by = None
     _array_join = None
+    _prewhere_criteria = ()
 
     def _statement_20(self, *args, **kwargs):
         statement = super(Query, self)._statement_20(*args, **kwargs)
+
+        if type(statement) is StandardSelect:
+            # Turn the statement into a ClickHouse select and carry the
+            # ClickHouse-specific state on the statement itself, so that
+            # it is part of the compilation cache key.  Setting these
+            # attributes only later (in the compile state factory) would
+            # let the compiled cache mix up default and e.g. FINAL or
+            # PREWHERE queries.
+            statement.__class__ = ClickHouseSelect
+            statement._final_clause = self._final
+            statement._sample_clause = sample_clause(self._sample)
+            statement._limit_by_clause = self._limit_by
+            statement._array_join = self._array_join
+            statement._prewhere_criteria = self._prewhere_criteria
+
         statement._compile_state_factory = partial(
             _compile_state_factory, statement._compile_state_factory, self
         )
@@ -114,6 +134,16 @@ class Query(BaseQuery):
     @_generative
     def limit_by(self, by_clauses, limit, offset=None):
         self._limit_by = LimitByClause(by_clauses, limit, offset)
+        return self
+
+    @_generative
+    def prewhere(self, *criteria):
+        """Return a new query with the given PREWHERE criteria added."""
+        for criterion in criteria:
+            criterion = coercions.expect(
+                roles.WhereHavingRole, criterion
+            )
+            self._prewhere_criteria += (criterion,)
         return self
 
     def join(self, target, onclause=None, **kwargs):
